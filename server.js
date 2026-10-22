@@ -8,7 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { TOPICS } = require('./topics');
+const { TOPICS, ANIME_INFO, imageQuery } = require('./topics');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -377,6 +377,13 @@ function wordChangeView(room, pid) {
   return out;
 }
 
+// صورة السالفة (بحث ويكيبيديا يتم من المتصفح) + معلومات الشخصية إذا الموضوع شخصيات أنمي
+function wordExtras(r) {
+  const out = { img: imageQuery(r.topic.id, r.word) };
+  if (r.topic.id === 'animechars' && ANIME_INFO[r.word]) out.info = { anime: ANIME_INFO[r.word][0], detail: ANIME_INFO[r.word][1] };
+  return out;
+}
+
 function view(room, pid) {
   const r = room.round;
   const v = {
@@ -385,6 +392,13 @@ function view(room, pid) {
     cfg: { wordChangeMax: MAX_WORD_CHANGES, penaltyPoints: PENALTY_POINTS, correct: CORRECT_POINTS, maxProposals: MAX_PROPOSALS },
     players: [...room.players.values()].map((p) => ({ id: p.id, name: p.name, score: p.score, connected: p.connected, ready: !!p.readyNext })),
   };
+  // خصم السؤال الكاشف يظهر فوراً بلوحة الترتيب (قبل نهاية الجولة)
+  if (r && ['reveal', 'questions', 'free', 'vote', 'guess'].includes(room.phase)) {
+    for (const pl of v.players) {
+      const n = r.penalty.applied.get(pl.id) || 0;
+      if (n) { pl.score -= n * PENALTY_POINTS; pl.pending = -n * PENALTY_POINTS; }
+    }
+  }
   if (room.phase === 'lobby') v.topics = TOPIC_LIST;
   if (!r || room.phase === 'lobby') return v;
 
@@ -393,7 +407,7 @@ function view(room, pid) {
   const g = { topic: { id: r.topic.id, name: r.topic.name, icon: r.topic.icon }, inRound, participants: r.participants };
   if (inRound && phase !== 'scores') {
     g.role = pid === r.outsiderId ? 'out' : 'in';
-    if (g.role === 'in') g.word = r.word;
+    if (g.role === 'in') { g.word = r.word; Object.assign(g, wordExtras(r)); }
   }
   if (phase === 'reveal') {
     g.readyIds = [...r.ready];
@@ -409,6 +423,7 @@ function view(room, pid) {
     if (pid === r.outsiderId) g.options = r.guess.options;
   } else if (phase === 'scores') {
     g.outsiderId = r.outsiderId; g.word = r.word; g.votes = Object.fromEntries(r.votes);
+    Object.assign(g, wordExtras(r));
     g.guess = { picked: r.guess.picked, correct: r.guess.correct, timedOut: r.guess.timedOut };
     g.breakdown = r.breakdown;
   }

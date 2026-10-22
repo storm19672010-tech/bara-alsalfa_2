@@ -106,6 +106,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await wait(50);
   assert.strictEqual(host.state.game.penalty.active, null);
   assert.strictEqual(host.state.game.penalty.applied[K.pid], 1, 'انخصم من خالد');
+  assert.strictEqual(host.state.players.find((p) => p.id === K.pid).score, -10, 'الخصم يظهر فوراً بلوحة الترتيب');
+  assert(inCs[0].state.game.img && inCs[0].state.game.img.q, 'جوا السالفة يوصله نص بحث الصورة');
+  assert(!outC.state.game.img, 'اللي برا ما يوصله شي عن السالفة');
 
   // خصم ثاني: نور تقترح على سامر، واحد يرفض
   await cs[3].act('proposePenalty', { targetId: host.pid });
