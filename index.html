@@ -222,6 +222,18 @@ label.l{display:block;font-size:14px;color:var(--muted);margin:0 4px 6px}
 }
 .opt:active{transform:scale(.95);border-color:var(--amber);background:rgba(255,182,39,.12)}
 
+/* ---------- صورة السالفة ومعلومات الشخصية ---------- */
+.wimg{width:112px;height:112px;border-radius:18px;object-fit:cover;border:2px solid rgba(255,255,255,.2);background:#0b0e17;flex:none}
+.wimg.ph{display:grid;place-items:center;font-size:52px;object-fit:initial}
+.wimg.lg{width:150px;height:150px;border-radius:22px;margin:0 auto 8px}
+.wimg.lg.ph{font-size:70px}
+.winfo{background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:14px;padding:8px 12px;font-size:14.5px;line-height:1.45;color:#dfe5f3;max-width:100%}
+.winfo b{color:var(--amber);font-family:'Cairo',sans-serif}
+.sb-r .pen-d{font-size:13px;font-weight:800;color:var(--red);direction:ltr}
+.flip{height:390px}
+.face.in{gap:7px;padding:14px}
+.face.in .theword{font-size:clamp(30px,9vw,44px)}
+
 /* ---------- النتائج ---------- */
 .wordbox{text-align:center;padding:18px 12px;border-radius:22px;background:linear-gradient(160deg,#0f2a25,#0b1613);border:1.5px solid rgba(53,224,161,.5)}
 .wordbox .w{font-family:'Cairo',sans-serif;font-weight:900;font-size:44px;line-height:1.2}
@@ -308,6 +320,30 @@ function av(id, size) {
   return `<span class="av ${size || ''}" style="--c:${colorOf(n)}">${esc([...n][0] || '?')}</span>`;
 }
 const isHost = () => S && S.hostId === S.me;
+
+/* صور السالفة من ويكيبيديا (من متصفح اللاعب). إذا فشلت تظهر إيموجي الموضوع */
+const imgCache = {}; const imgReq = new Set();
+async function loadImg(k, img) {
+  if (imgReq.has(k)) return; imgReq.add(k);
+  try {
+    const u = `https://${img.lang}.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(img.q)}&gsrlimit=6&prop=pageimages&piprop=thumbnail&pithumbsize=500&format=json&origin=*`;
+    const j = await (await fetch(u)).json();
+    const pages = Object.values((j.query && j.query.pages) || {}).sort((a, b) => a.index - b.index);
+    const hit = pages.find((p) => p.thumbnail && p.thumbnail.source);
+    imgCache[k] = hit ? hit.thumbnail.source : null;
+  } catch (e) { imgCache[k] = null; }
+  if (imgCache[k]) render();
+}
+function imgHTML(g, big) {
+  if (!g || !g.img) return '';
+  const k = g.img.lang + ':' + g.img.q;
+  if (imgCache[k] === undefined) loadImg(k, g.img);
+  const cls = 'wimg' + (big ? ' lg' : '');
+  return imgCache[k] ? `<img class="${cls}" src="${esc(imgCache[k])}" alt="" referrerpolicy="no-referrer">` : `<div class="${cls} ph">${g.topic.icon}</div>`;
+}
+function infoHTML(g) {
+  return g && g.info ? `<div class="winfo">${g.info.anime ? `من أنمي <b>${esc(g.info.anime)}</b> — ` : ''}${esc(g.info.detail)}</div>` : '';
+}
 
 /* ====== اتصال ====== */
 async function post(path, body) {
@@ -414,7 +450,7 @@ function scoreboardHTML() {
   let rank = 0, prev = null;
   const rows = sorted.map((p, i) => {
     if (p.score !== prev) { rank = i + 1; prev = p.score; }
-    return `<div class="sb-r ${p.id === S.me ? 'me' : ''} ${p.connected ? '' : 'off'}"><span class="rk">${medals[rank - 1] || rank}</span>${av(p.id, 'sm')}<span class="nm">${esc(p.name)}${p.id === S.hostId ? ' 👑' : ''}</span><span class="sc">${p.score}</span></div>`;
+    return `<div class="sb-r ${p.id === S.me ? 'me' : ''} ${p.connected ? '' : 'off'}"><span class="rk">${medals[rank - 1] || rank}</span>${av(p.id, 'sm')}<span class="nm">${esc(p.name)}${p.id === S.hostId ? ' 👑' : ''}</span>${p.pending ? `<span class="pen-d">${p.pending}</span>` : ''}<span class="sc">${p.score}</span></div>`;
   }).join('');
   return `<div class="sb"><div class="sb-h" data-act="sb-toggle">🏆 الترتيب<span class="car">${sbOpen ? '▲' : '▼'}</span></div>${sbOpen ? `<div class="sb-list">${rows}</div>` : ''}</div>`;
 }
@@ -535,7 +571,7 @@ function revealHTML() {
   const readyIds = g.readyIds || [];
   const iReady = readyIds.includes(S.me);
   const back = g.role === 'in'
-    ? `<div class="face back in"><div class="role-tag">✅ أنت جوا السالفة</div><div class="muted">السالفة هي:</div><div class="theword">${esc(g.word)}</div><div class="pill">${g.topic.icon} ${esc(g.topic.name)}</div></div>`
+    ? `<div class="face back in"><div class="role-tag">✅ أنت جوا السالفة</div>${imgHTML(g)}<div class="theword">${esc(g.word)}</div>${infoHTML(g)}<div class="pill">${g.topic.icon} ${esc(g.topic.name)}</div></div>`
     : `<div class="face back out"><div class="big-out">🕵️</div><div class="role-tag">أنت برا السالفة!</div><div style="color:#ffc0cb">ما تعرف السالفة… اندمج واكتشفها من كلامهم</div><div class="pill">الموضوع: ${g.topic.icon} ${esc(g.topic.name)}</div></div>`;
   const chips = g.participants.map((id) => `<span class="dot ${readyIds.includes(id) ? 'y' : ''}">${av(id, 'sm')}${esc(nameOf(id))} ${readyIds.includes(id) ? '✓' : ''}</span>`).join('');
   return `<section class="screen">
@@ -673,7 +709,7 @@ function scoresHTML() {
   const me = P(S.me);
   const readyCount = S.players.filter((p) => p.ready).length;
   return `<section class="screen">
-    <div class="wordbox"><div class="muted" style="font-weight:700">السالفة كانت</div><div class="w">${esc(g.word)}</div><div class="pill" style="margin-top:6px">${g.topic.icon} ${esc(g.topic.name)}</div></div>
+    <div class="wordbox"><div class="muted" style="font-weight:700">السالفة كانت</div>${imgHTML(g, true)}<div class="w">${esc(g.word)}</div>${g.info ? `<div style="margin-top:8px">${infoHTML(g)}</div>` : ''}<div class="pill" style="margin-top:6px">${g.topic.icon} ${esc(g.topic.name)}</div></div>
     <div class="card center" style="padding:12px"><b>${esc(nameOf(g.outsiderId))}</b> ${gs.timedOut ? 'ما خمّن السالفة ⏭️' : gs.correct ? `خمّن السالفة صح 🎯` : `خمّن غلط ❌ (اختار: ${esc(gs.picked)})`}</div>
     <div class="card"><h3>🏆 السكور</h3><div class="stack" style="gap:8px">${rows}</div></div>
     <button class="btn primary" data-act="ready-next" ${me && me.ready ? 'disabled' : ''}>${me && me.ready ? `جاهز ✓ (${readyCount}/${S.players.length})` : '🔄 جاهز لجولة أخرى'}</button>
@@ -729,7 +765,7 @@ function overlays() {
   if (cardOpen && S && S.game && S.game.role) {
     const g = S.game;
     h += `<div class="sheet-bg" data-act="card-close"><div class="sheet" data-stop="1" style="text-align:center">
-      ${g.role === 'in' ? `<div class="role-tag" style="color:var(--green)">✅ أنت جوا السالفة</div><div class="muted" style="margin-top:6px">السالفة:</div><div class="theword" style="margin:10px 0">${esc(g.word)}</div>`
+      ${g.role === 'in' ? `<div class="role-tag" style="color:var(--green)">✅ أنت جوا السالفة</div><div class="muted" style="margin-top:6px">السالفة:</div><div class="theword" style="margin:10px 0">${esc(g.word)}</div>${imgHTML(g)}${infoHTML(g)}`
         : `<div class="big-out">🕵️</div><div class="role-tag" style="color:var(--red)">أنت برا السالفة</div><p style="color:#ffc0cb">اندمج واكتشفها من كلامهم</p>`}
       <div class="pill">الموضوع: ${g.topic.icon} ${esc(g.topic.name)}</div>
       <button class="btn" style="margin-top:16px" data-act="card-close">إخفاء</button></div></div>`;

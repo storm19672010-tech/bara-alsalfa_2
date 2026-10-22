@@ -8,7 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { TOPICS, ANIME_INFO, imageQuery } = require('./topics');
+const { TOPICS, ANIME_INFO, ANIME_SHOWS, imageQuery } = require('./topics');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -381,6 +381,7 @@ function wordChangeView(room, pid) {
 function wordExtras(r) {
   const out = { img: imageQuery(r.topic.id, r.word) };
   if (r.topic.id === 'animechars' && ANIME_INFO[r.word]) out.info = { anime: ANIME_INFO[r.word][0], detail: ANIME_INFO[r.word][1] };
+  else if (r.topic.id === 'anime' && ANIME_SHOWS[r.word]) out.info = { anime: null, detail: ANIME_SHOWS[r.word][0] };
   return out;
 }
 
