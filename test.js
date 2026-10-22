@@ -209,6 +209,15 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.strictEqual(host.state.phase, 'lobby', 'انلغت لأقل من 3');
   assert(host.state.notice, 'رسالة إلغاء');
 
+  // المضيف يطلع: ينحط مضيف ثاني ويوصل إشعار
+  const rest = cs.filter((c) => c !== host && c.req && !c.req.destroyed);
+  await host.act('leave');
+  await wait(150);
+  const alive = rest.filter((c) => c.state.players.some((p) => p.id === c.state.hostId));
+  assert(alive.length, 'في مضيف جديد');
+  assert(alive[0].state.hostId !== host.pid, 'المضيف الجديد غير القديم');
+  assert(/المضيف الجديد/.test(alive[0].state.toast.text), 'إشعار المضيف الجديد');
+
   cs.forEach((c) => c.close());
   console.log('✅ كل الاختبارات نجحت');
   process.exit(0);

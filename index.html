@@ -177,6 +177,9 @@ label.l{display:block;font-size:14px;color:var(--muted);margin:0 4px 6px}
 .step.cur{background:rgba(255,182,39,.16);border-color:var(--amber);color:#ffe2a0;font-weight:800}
 
 
+.mebar{display:flex;align-items:center;gap:10px;margin:-6px 0 14px;font-size:17px;color:var(--muted)}
+.mebar b{color:var(--text);font-family:'Cairo',sans-serif;font-weight:800}
+
 /* ---------- لوحة الترتيب ---------- */
 .sb{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015)),var(--panel);border:1px solid rgba(255,182,39,.35);border-radius:20px;padding:10px 12px;margin-bottom:14px}
 .sb-h{display:flex;align-items:center;gap:8px;cursor:pointer;font-family:'Cairo',sans-serif;font-weight:900;font-size:18px;color:var(--amber);user-select:none}
@@ -378,12 +381,18 @@ function render() {
   const root = $('#app'); const ov = $('#overlay');
   if (!S) { root.innerHTML = homeHTML(); ov.innerHTML = overlays(); root.classList.remove('enter'); void root.offsetWidth; root.classList.add('enter'); return; }
   const key = S.phase + ':' + S.roundNo;
-  root.innerHTML = topbar() + scoreboardHTML() + phaseHTML();
+  root.innerHTML = topbar() + mebar() + scoreboardHTML() + phaseHTML();
   ov.innerHTML = penaltySheet() + wordChangeSheet() + overlays();
   if (key !== lastKey) {
     lastKey = key; cardShown = false; pickerOpen = false;
     root.classList.remove('enter'); void root.offsetWidth; root.classList.add('enter');
   }
+}
+
+function mebar() {
+  const me = P(S.me);
+  if (!me) return '';
+  return `<div class="mebar">${av(me.id, 'sm')}<span>أنت: <b>${esc(me.name)}</b></span>${me.id === S.hostId ? '<span class="pill amber">👑 المضيف</span>' : ''}</div>`;
 }
 
 function topbar() {
@@ -705,7 +714,8 @@ function wordChangeSheet() {
     <div class="vs">${vs}</div>
     ${a.canVote ? `<div class="row"><button class="btn green" data-act="wc-yes">👍 نغيّر</button><button class="btn danger" data-act="wc-no">👎 ما نغيّر</button></div>`
       : `<div class="center muted">تم تصويتك، ننتظر الباقي…</div>`}
-    ${isHost() ? `<button class="btn ghost sm" style="margin:14px auto 0" data-act="wc-cancel">إلغاء التصويت (كمضيف)</button>` : ''}
+    ${a.proposerId === S.me ? `<button class="btn ghost sm" style="margin:14px auto 0" data-act="wc-cancel">↩️ إلغاء طلبي</button>`
+      : isHost() ? `<button class="btn ghost sm" style="margin:14px auto 0" data-act="wc-cancel">إلغاء التصويت (كمضيف)</button>` : ''}
   </div></div>`;
 }
 

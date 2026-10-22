@@ -311,8 +311,13 @@ function removePlayer(room, pid, reason) {
   room.players.delete(pid);
   if (conn) { try { conn.end(); } catch (e) { /* ignore */ } }
   if (room.players.size === 0) { destroyRoom(room); return; }
-  toast(room, reason || `${leftName} طلع من الغرفة 🚪`);
-  if (room.hostId === pid) room.hostId = pickNewHost(room, pid);
+  let msg = reason || `${leftName} طلع من الغرفة 🚪`;
+  if (room.hostId === pid) {
+    room.hostId = pickNewHost(room, pid);
+    const nh = room.players.get(room.hostId);
+    if (nh) msg += ` — ${nh.name} صار المضيف الجديد 👑`;
+  }
+  toast(room, msg);
 
   const r = room.round;
   const live = ['reveal', 'questions', 'free', 'vote', 'guess'].includes(room.phase);
@@ -500,8 +505,10 @@ function act(room, p, b) {
       return ok();
     }
     case 'cancelWordChange': {
-      if (!isHost || !r || !r.wordChange.active) return err('مو وقتها');
-      endWordChange(room, false, 'المضيف ألغى تصويت تغيير السالفة');
+      if (!r || !r.wordChange.active) return err('مو وقتها');
+      const mine = r.wordChange.active.proposerId === p.id;
+      if (!isHost && !mine) return err('بس اللي طلب التغيير أو المضيف يلغي');
+      endWordChange(room, false, mine ? `${p.name} ألغى طلب تغيير السالفة` : 'المضيف ألغى تصويت تغيير السالفة');
       return ok();
     }
     case 'cancelPenalty': {
@@ -680,7 +687,11 @@ function sse(req, res, url) {
     cur.dcTimer = setTimeout(() => {
       if (!rooms.has(room.code) || cur.connected || !room.players.has(cur.id)) return;
       if (['lobby', 'scores'].includes(room.phase)) removePlayer(room, cur.id);
-      else if (room.hostId === cur.id) room.hostId = pickNewHost(room, cur.id) || cur.id;
+      else if (room.hostId === cur.id) {
+        room.hostId = pickNewHost(room, cur.id) || cur.id;
+        const nh = room.players.get(room.hostId);
+        if (nh && nh.id !== cur.id) toast(room, `${cur.name} انقطع، و${nh.name} صار المضيف الجديد 👑`);
+      }
       if (rooms.has(room.code)) broadcast(room);
     }, 20000);
     broadcast(room);
