@@ -177,6 +177,19 @@ label.l{display:block;font-size:14px;color:var(--muted);margin:0 4px 6px}
 .step.cur{background:rgba(255,182,39,.16);border-color:var(--amber);color:#ffe2a0;font-weight:800}
 
 
+/* ---------- لوحة الترتيب ---------- */
+.sb{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015)),var(--panel);border:1px solid rgba(255,182,39,.35);border-radius:20px;padding:10px 12px;margin-bottom:14px}
+.sb-h{display:flex;align-items:center;gap:8px;cursor:pointer;font-family:'Cairo',sans-serif;font-weight:900;font-size:18px;color:var(--amber);user-select:none}
+.sb-h .car{margin-inline-start:auto;font-size:14px;color:var(--muted)}
+.sb-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.sb-r{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid transparent}
+.sb-r.me{border-color:rgba(255,182,39,.4);background:rgba(255,182,39,.07)}
+.sb-r.off{opacity:.5}
+.sb-r .rk{width:30px;text-align:center;font-family:'Cairo',sans-serif;font-weight:900;font-size:20px;flex:none}
+.sb-r .nm{flex:1;min-width:0;font-weight:800;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-r .sc{font-family:'Cairo',sans-serif;font-weight:900;font-size:20px;direction:ltr}
+@media (min-width:1000px){.sb{position:fixed;top:16px;right:16px;width:260px;margin:0;z-index:20;max-height:calc(100dvh - 32px);overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.4)}}
+
 /* ---------- التصويت ---------- */
 .vgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 .vcard{
@@ -276,6 +289,7 @@ let session = null;         // {code,pid,token}
 let es = null;
 let homeView = 'home';      // home | create | join
 let selTopic = null;
+let sbOpen = true;
 let cardShown = false, cardOpen = false, rulesOpen = false, pickerOpen = false;
 let lastToast = null, lastKey = '', lastTurnKey = '', unloading = false;
 window.addEventListener('pagehide', () => { unloading = true; });
@@ -364,7 +378,7 @@ function render() {
   const root = $('#app'); const ov = $('#overlay');
   if (!S) { root.innerHTML = homeHTML(); ov.innerHTML = overlays(); root.classList.remove('enter'); void root.offsetWidth; root.classList.add('enter'); return; }
   const key = S.phase + ':' + S.roundNo;
-  root.innerHTML = topbar() + phaseHTML();
+  root.innerHTML = topbar() + scoreboardHTML() + phaseHTML();
   ov.innerHTML = penaltySheet() + overlays();
   if (key !== lastKey) {
     lastKey = key; cardShown = false; pickerOpen = false;
@@ -382,6 +396,18 @@ function topbar() {
     <button class="iconbtn" data-act="rules-open" title="شرح اللعبة">❔</button>
     <button class="iconbtn" data-act="leave" title="خروج">🚪</button>
   </div>`;
+}
+
+function scoreboardHTML() {
+  if (!S.game || !['reveal', 'questions', 'free', 'vote', 'guess'].includes(S.phase)) return '';
+  const sorted = S.players.slice().sort((a, b) => b.score - a.score);
+  const medals = ['🥇', '🥈', '🥉'];
+  let rank = 0, prev = null;
+  const rows = sorted.map((p, i) => {
+    if (p.score !== prev) { rank = i + 1; prev = p.score; }
+    return `<div class="sb-r ${p.id === S.me ? 'me' : ''} ${p.connected ? '' : 'off'}"><span class="rk">${medals[rank - 1] || rank}</span>${av(p.id, 'sm')}<span class="nm">${esc(p.name)}${p.id === S.hostId ? ' 👑' : ''}</span><span class="sc">${p.score}</span></div>`;
+  }).join('');
+  return `<div class="sb"><div class="sb-h" data-act="sb-toggle">🏆 الترتيب<span class="car">${sbOpen ? '▲' : '▼'}</span></div>${sbOpen ? `<div class="sb-list">${rows}</div>` : ''}</div>`;
 }
 
 function phaseHTML() {
@@ -699,6 +725,7 @@ const H = {
   'skip-reveal': () => act('skipReveal'),
   'next-turn': () => act('nextTurn'),
   'skip-free': () => act('skipToFree'),
+  'sb-toggle': () => { sbOpen = !sbOpen; render(); },
   'start-vote': () => act('startVote'),
   'end-vote': () => act('endVote'),
   'skip-guess': () => act('skipGuess'),
