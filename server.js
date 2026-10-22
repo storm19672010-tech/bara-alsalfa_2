@@ -20,6 +20,7 @@ const MAX_PLAYERS = 12;
 const CORRECT_POINTS = 100;  // تصويت صح / تخمين صح
 const PENALTY_POINTS = 10;   // خصم السؤال الكاشف
 const MAX_PROPOSALS = 3;     // عدد محاولات طلب الخصم لكل لاعب بالجولة
+const MAX_WORD_CHANGES = 2;  // عدد محاولات طلب تغيير السالفة لكل لاعب بالجولة
 const GUESS_OPTIONS = 9;     // عدد خيارات التخمين
 
 const TOPIC_LIST = TOPICS.map(({ id, name, icon, words }) => ({ id, name, icon, count: words.length }));
@@ -46,6 +47,10 @@ function newCode() {
 function cleanName(n) {
   return String(n == null ? '' : n).replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, '').replace(/\s+/g, ' ').trim().slice(0, 16);
 }
+const nameKey = (n) => String(n).toLowerCase()
+  .replace(/[ً-ٰٟـ]/g, '')
+  .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+  .replace(/[\s\-_.]+/g, '');
 const ok = (extra) => Object.assign({ ok: true }, extra || {});
 const err = (m, status) => ({ error: m, status: status || 400 });
 
@@ -93,7 +98,8 @@ function connectedParticipants(room) {
 
 function pickNewHost(room, exceptId) {
   const list = [...room.players.values()].filter((p) => p.id !== exceptId);
-  const c = list.find((p) => p.connected) || list[0];
+  const inRound = room.round ? room.round.participants : [];
+  const c = list.find((p) => p.connected && inRound.includes(p.id)) || list.find((p) => p.connected) || list[0];
   return c ? c.id : null;
 }
 
@@ -113,11 +119,13 @@ function startRound(room, topic, players) {
   for (const p of room.players.values()) p.readyNext = false;
   room.round = {
     topic, word: pick(topic.words), outsiderId: pick(ids), participants,
-    ready: new Set(), turns: order.map((id, i) => ({ from: id, to: order[(i + 1) % order.length] })),
+    order, ready: new Set(), turns: order.map((id, i) => ({ from: id, to: order[(i + 1) % order.length] })),
     turnIdx: -1,
     votes: new Map(), guess: null, breakdown: null,
     penalty: { active: null, applied: new Map(), proposals: new Map(), seq: 0 },
+    wordChange: { active: null, proposals: new Map(), used: [], seq: 0 },
   };
+  room.round.wordChange.used.push(room.round.word);
   setPhase(room, 'reveal');
 }
 
@@ -148,6 +156,8 @@ function enterFree(room) {
 function enterVote(room) {
   const r = room.round;
   setPhase(room, 'vote');
+  r.penalty.active = null;
+  r.wordChange.active = null;
 }
 
 function finishVote(room) {
@@ -165,6 +175,7 @@ function finishRound(room, picked) {
   r.guess.correct = picked === r.word;
   // إلغاء أي تصويت خصم معلّق
   r.penalty.active = null;
+  r.wordChange.active = null;
   r.breakdown = [];
   for (const id of r.participants) {
     const p = room.players.get(id);
@@ -235,6 +246,42 @@ function checkPenalty(room) {
   if (voters.length && voters.every((id) => pen.votes[id] === true)) return endPenalty(room, true);
 }
 
+// ---------- تغيير السالفة (لازم الكل يوافق) ----------
+function wcVoters(room, wc) {
+  const r = room.round;
+  return r.participants.filter((id) => {
+    const p = room.players.get(id);
+    return p && (p.connected || wc.votes[id] !== undefined);
+  });
+}
+
+function endWordChange(room, passed, why) {
+  const r = room.round;
+  const wc = r.wordChange.active;
+  if (!wc) return;
+  r.wordChange.active = null;
+  if (passed) {
+    const left = r.topic.words.filter((w) => !r.wordChange.used.includes(w));
+    if (left.length) {
+      r.word = pick(left);
+      r.wordChange.used.push(r.word);
+      toast(room, 'تم تغيير السالفة 🔄 شوفوا بطاقاتكم (🎴) للسالفة الجديدة');
+      return;
+    }
+  }
+  toast(room, why || 'ما وافق الكل، السالفة ما تغيّرت');
+}
+
+function checkWordChange(room) {
+  const r = room.round;
+  if (!r || !r.wordChange.active) return;
+  if (!['questions', 'free'].includes(room.phase)) return;
+  const wc = r.wordChange.active;
+  const voters = wcVoters(room, wc);
+  if (voters.some((id) => wc.votes[id] === false)) return endWordChange(room, false, 'في لاعب رفض، السالفة ما تغيّرت');
+  if (voters.length && voters.every((id) => wc.votes[id] === true)) return endWordChange(room, true);
+}
+
 // ---------- متابعة التقدم (جاهزين / صوتوا / ...) ----------
 function checkProgress(room) {
   const r = room.round;
@@ -250,18 +297,21 @@ function checkProgress(room) {
     return;
   }
   if (room.round && (room.phase === 'questions' || room.phase === 'free' || room.phase === 'vote')) checkPenalty(room);
+  if (room.round) checkWordChange(room);
 }
 
 // ---------- إزالة لاعب ----------
-function removePlayer(room, pid) {
+function removePlayer(room, pid, reason) {
   const p = room.players.get(pid);
   if (!p) return;
   clearTimeout(p.dcTimer); clearTimeout(p.checkTimer);
   const conn = p.conn;
+  const leftName = p.name;
   p.conn = null;
   room.players.delete(pid);
   if (conn) { try { conn.end(); } catch (e) { /* ignore */ } }
   if (room.players.size === 0) { destroyRoom(room); return; }
+  toast(room, reason || `${leftName} طلع من الغرفة 🚪`);
   if (room.hostId === pid) room.hostId = pickNewHost(room, pid);
 
   const r = room.round;
@@ -270,12 +320,20 @@ function removePlayer(room, pid) {
     r.participants = r.participants.filter((x) => x !== pid);
     r.ready.delete(pid);
     r.votes.delete(pid);
+    for (const [k, v] of [...r.votes]) if (v === pid) r.votes.delete(k);
     if (pid === r.outsiderId || r.participants.length < MIN_PLAYERS) {
       abortRound(room, 'لاعب طلع من الغرفة وانلغت الجولة. السكور محفوظ، ابدؤوا جولة جديدة.');
     } else {
+      // نعيد بناء سلسلة الأسئلة بدون اللاعب اللي طلع (ينلغى دوره)
+      const oldIdx = r.turnIdx;
+      const cur = r.turns[oldIdx];
+      r.order = r.order.filter((x) => x !== pid);
+      r.turns = r.order.map((id, i) => ({ from: id, to: r.order[(i + 1) % r.order.length] }));
       if (room.phase === 'questions') {
-        const t = r.turns[r.turnIdx];
-        if (!validTurn(room, t)) { r.turnIdx -= 1; advanceTurn(room); }
+        if (cur && cur.from !== pid && r.order.includes(cur.from)) r.turnIdx = r.order.indexOf(cur.from);
+        else { r.turnIdx = oldIdx - 1; advanceTurn(room); }
+      } else if (room.phase !== 'reveal') {
+        r.turnIdx = r.turns.length;
       }
       if (room.round) { checkProgress(room); }
     }
@@ -303,12 +361,23 @@ function penaltyView(room, pid) {
   return out;
 }
 
+function wordChangeView(room, pid) {
+  const r = room.round;
+  const wc = r.wordChange.active;
+  const out = { proposalsLeft: Math.max(0, MAX_WORD_CHANGES - (r.wordChange.proposals.get(pid) || 0)), active: null };
+  if (wc) {
+    const voters = wcVoters(room, wc);
+    out.active = { id: wc.id, proposerId: wc.proposerId, votes: wc.votes, voters, canVote: voters.includes(pid) && wc.votes[pid] === undefined };
+  }
+  return out;
+}
+
 function view(room, pid) {
   const r = room.round;
   const v = {
     now: Date.now(), code: room.code, me: pid, hostId: room.hostId, phase: room.phase,
     roundNo: room.roundNo, notice: room.notice, toast: room.toast, min: MIN_PLAYERS, max: MAX_PLAYERS,
-    cfg: { penaltyPoints: PENALTY_POINTS, correct: CORRECT_POINTS, maxProposals: MAX_PROPOSALS },
+    cfg: { wordChangeMax: MAX_WORD_CHANGES, penaltyPoints: PENALTY_POINTS, correct: CORRECT_POINTS, maxProposals: MAX_PROPOSALS },
     players: [...room.players.values()].map((p) => ({ id: p.id, name: p.name, score: p.score, connected: p.connected, ready: !!p.readyNext })),
   };
   if (room.phase === 'lobby') v.topics = TOPIC_LIST;
@@ -325,9 +394,9 @@ function view(room, pid) {
     g.readyIds = [...r.ready];
     g.total = connectedParticipants(room).length;
   } else if (phase === 'questions') {
-    g.turns = r.turns; g.turnIdx = r.turnIdx; g.penalty = penaltyView(room, pid);
+    g.turns = r.turns; g.turnIdx = r.turnIdx; g.penalty = penaltyView(room, pid); g.wordChange = wordChangeView(room, pid);
   } else if (phase === 'free') {
-    g.penalty = penaltyView(room, pid);
+    g.penalty = penaltyView(room, pid); g.wordChange = wordChangeView(room, pid);
   } else if (phase === 'vote') {
     g.voted = [...r.votes.keys()]; g.myVote = r.votes.get(pid) || null;
   } else if (phase === 'guess') {
@@ -398,7 +467,7 @@ function act(room, p, b) {
     }
     case 'proposePenalty': {
       if (!['questions', 'free'].includes(room.phase) || !inRound) return err('الخصم متاح أثناء الأسئلة بس');
-      if (r.penalty.active) return err('في تصويت خصم شغّال، استنى');
+      if (r.penalty.active || r.wordChange.active) return err('في تصويت شغّال، استنى');
       const target = String(b.targetId || '');
       if (target === p.id) return err('ما بتقدر تخصم من نفسك');
       if (!r.participants.includes(target) || !room.players.has(target)) return err('اللاعب مو موجود');
@@ -408,6 +477,31 @@ function act(room, p, b) {
       const pen = { id: ++r.penalty.seq, targetId: target, proposerId: p.id, votes: { [p.id]: true } };
       r.penalty.active = pen;
       checkPenalty(room);
+      return ok();
+    }
+    case 'proposeWordChange': {
+      if (!['questions', 'free'].includes(room.phase) || !inRound) return err('تغيير السالفة متاح أثناء الأسئلة بس');
+      if (r.penalty.active || r.wordChange.active) return err('في تصويت شغّال، استنى');
+      const used = r.wordChange.proposals.get(p.id) || 0;
+      if (used >= MAX_WORD_CHANGES) return err(`خلصت محاولاتك (${MAX_WORD_CHANGES} بالجولة)`);
+      if (!r.topic.words.some((w) => !r.wordChange.used.includes(w))) return err('ما بقي سوالف جديدة بهالموضوع');
+      r.wordChange.proposals.set(p.id, used + 1);
+      r.wordChange.active = { id: ++r.wordChange.seq, proposerId: p.id, votes: { [p.id]: true } };
+      checkWordChange(room);
+      return ok();
+    }
+    case 'wordChangeVote': {
+      const wc = r && r.wordChange.active;
+      if (!wc) return err('ما في تصويت شغّال');
+      if (!inRound) return err('ما بتقدر تصوّت');
+      if (wc.votes[p.id] !== undefined) return err('صوّتت من قبل');
+      wc.votes[p.id] = !!b.agree;
+      checkWordChange(room);
+      return ok();
+    }
+    case 'cancelWordChange': {
+      if (!isHost || !r || !r.wordChange.active) return err('مو وقتها');
+      endWordChange(room, false, 'المضيف ألغى تصويت تغيير السالفة');
       return ok();
     }
     case 'cancelPenalty': {
@@ -467,7 +561,7 @@ function act(room, p, b) {
       const t = room.players.get(String(b.targetId || ''));
       if (!t || t.id === p.id) return err('ما بصير');
       if (t.conn) { try { t.conn.write('event: kicked\ndata: {}\n\n'); } catch (e) { /* ignore */ } }
-      removePlayer(room, t.id);
+      removePlayer(room, t.id, `${t.name} انطرد من الغرفة 🚪`);
       return ok();
     }
     case 'leave': {
@@ -526,15 +620,15 @@ async function api(req, res, url) {
     if (!room) return reply(res, err('ما لقينا غرفة بهالكود', 404));
     const name = cleanName(b.name);
     if (!name) return reply(res, err('اكتب اسمك'));
-    const same = [...room.players.values()].find((p) => p.name.toLowerCase() === name.toLowerCase());
+    const same = [...room.players.values()].find((p) => nameKey(p.name) === nameKey(name));
     if (same) {
       if (same.connected) return reply(res, err('الاسم مستخدم بالغرفة، اختر اسم ثاني', 409));
       same.token = crypto.randomBytes(16).toString('hex'); // رجوع لاعب انقطع
       return reply(res, ok({ code: room.code, pid: same.id, token: same.token }));
     }
-    if (!['lobby', 'scores'].includes(room.phase)) return reply(res, err('اللعبة بدأت، استنى الجولة الجاية', 409));
     if (room.players.size >= MAX_PLAYERS) return reply(res, err('الغرفة ممتلئة', 409));
     const p = addPlayer(room, name);
+    toast(room, ['lobby', 'scores'].includes(room.phase) ? `${p.name} دخل الغرفة 👋` : `${p.name} دخل الغرفة وبينتظر الجولة الجاية ⏳`);
     broadcast(room);
     return reply(res, ok({ code: room.code, pid: p.id, token: p.token }));
   }

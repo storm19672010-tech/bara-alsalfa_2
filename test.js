@@ -63,13 +63,28 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const outC = cs[roles.indexOf('out')];
   const inCs = cs.filter((c) => c !== outC);
   assert(!outC.state.game.word, 'اللي برا ما يشوف السالفة');
-  const word = inCs[0].state.game.word;
+  let word = inCs[0].state.game.word;
   assert(word && inCs.every((c) => c.state.game.word === word), 'الكل جوا يشوف نفس السالفة');
   assert(!JSON.stringify(outC.state).includes(word) || true);
   assert(!('outsiderId' in inCs[0].state.game), 'ما نكشف اللي برا قبل التصويت');
   // لاعب جديد ما يقدر يدخل بالنص
+  // اسم مشابه (تشكيل/مسافات) مرفوض
+  const dup2 = await post('/api/join', { code: host.code, name: ' سَامر ' });
+  assert(dup2.error, 'رفض الاسم المشابه');
+  // لاعب متأخر: يدخل غرفة الانتظار ولا يشارك بالجولة الشغّالة
   const late = await post('/api/join', { code: host.code, name: 'متأخر' });
-  assert(late.error, 'منع الدخول أثناء الجولة');
+  assert(late.ok, 'الدخول أثناء الجولة مسموح (انتظار)');
+  const lateC = new Client('متأخر'); Object.assign(lateC, late); await lateC.open();
+  await wait(100);
+  assert.strictEqual(lateC.state.game.inRound, false, 'المتأخر مو بالجولة');
+  assert(!lateC.state.game.role, 'المتأخر بدون دور');
+  assert.strictEqual(host.state.players.length, 5);
+  assert.strictEqual(host.state.game.participants.length, 4);
+  await lateC.act('leave');
+  await wait(100);
+  assert.strictEqual(host.state.players.length, 4);
+  assert(/طلع/.test(host.state.toast.text), 'إشعار الخروج مباشرة');
+  lateC.close();
 
   // الجاهزية
   for (const c of cs) await c.act('ready');
@@ -98,6 +113,26 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await wait(50);
   assert.strictEqual(host.state.game.penalty.active, null, 'الرفض يلغي');
   assert.strictEqual(host.state.game.penalty.applied[host.pid], undefined);
+
+  // تغيير السالفة: الكل يوافق
+  const oldWord = word;
+  assert.strictEqual((await L.act('proposeWordChange')).ok, true);
+  await wait(50);
+  assert(host.state.game.wordChange.active, 'تصويت تغيير شغّال');
+  assert((await cs[3].act('proposePenalty', { targetId: host.pid })).error, 'ما يتزامن مع تصويت ثاني');
+  for (const c of cs) if (c !== L) assert((await c.act('wordChangeVote', { agree: true })).ok);
+  await wait(100);
+  assert.strictEqual(host.state.game.wordChange.active, null);
+  word = inCs[0].state.game.word;
+  assert(word !== oldWord, 'السالفة تغيّرت');
+  assert(inCs.every((c) => c.state.game.word === word), 'الكل جوا يشوف السالفة الجديدة');
+  assert(!outC.state.game.word, 'اللي برا لسا ما يعرف');
+  // تغيير ثاني: واحد يرفض
+  await cs[3].act('proposeWordChange');
+  await K.act('wordChangeVote', { agree: false });
+  await wait(50);
+  assert.strictEqual(host.state.game.wordChange.active, null, 'الرفض يلغي');
+  assert.strictEqual(inCs[0].state.game.word, word, 'السالفة ما تغيّرت');
 
   // الأدوار
   // التنقل بين الأسئلة للمضيف فقط
@@ -155,12 +190,19 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.strictEqual(host.state.roundNo, 2);
 
   // خروج لاعب غير اللي برا: الجولة تكمل بـ 3. خروج ثاني: تنلغي
+  for (const c of cs) await c.act('ready');
+  await wait(100);
+  assert.strictEqual(host.state.phase, 'questions');
   const out2 = cs.find((c) => c.state.game.role === 'out');
   const leaver = cs.find((c) => c !== out2 && c !== host);
   await leaver.act('leave');
   await wait(100);
-  assert.strictEqual(host.state.phase, 'reveal', 'الجولة تكمل');
+  assert.strictEqual(host.state.phase, 'questions', 'الجولة تكمل');
   assert.strictEqual(host.state.game.participants.length, 3);
+  assert.strictEqual(host.state.game.turns.length, 3, 'سلسلة الأسئلة انعاد بناؤها');
+  assert(host.state.game.turns.every((t) => host.state.game.participants.includes(t.from) && host.state.game.participants.includes(t.to) && t.from !== leaver.pid && t.to !== leaver.pid), 'دوره انلغى');
+  assert(host.state.game.turnIdx >= 0 && host.state.game.turnIdx < 3);
+  assert(/طلع/.test(host.state.toast.text));
   const leaver2 = cs.find((c) => c !== out2 && c !== host && c !== leaver);
   await leaver2.act('leave');
   await wait(100);

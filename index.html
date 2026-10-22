@@ -379,7 +379,7 @@ function render() {
   if (!S) { root.innerHTML = homeHTML(); ov.innerHTML = overlays(); root.classList.remove('enter'); void root.offsetWidth; root.classList.add('enter'); return; }
   const key = S.phase + ':' + S.roundNo;
   root.innerHTML = topbar() + scoreboardHTML() + phaseHTML();
-  ov.innerHTML = penaltySheet() + overlays();
+  ov.innerHTML = penaltySheet() + wordChangeSheet() + overlays();
   if (key !== lastKey) {
     lastKey = key; cardShown = false; pickerOpen = false;
     root.classList.remove('enter'); void root.offsetWidth; root.classList.add('enter');
@@ -399,7 +399,7 @@ function topbar() {
 }
 
 function scoreboardHTML() {
-  if (!S.game || !['reveal', 'questions', 'free', 'vote', 'guess'].includes(S.phase)) return '';
+  if (!S) return '';
   const sorted = S.players.slice().sort((a, b) => b.score - a.score);
   const medals = ['🥇', '🥈', '🥉'];
   let rank = 0, prev = null;
@@ -411,6 +411,7 @@ function scoreboardHTML() {
 }
 
 function phaseHTML() {
+  if (S.game && S.game.inRound === false && ['reveal', 'questions', 'free', 'vote', 'guess'].includes(S.phase)) return waitingHTML();
   switch (S.phase) {
     case 'lobby': return lobbyHTML();
     case 'reveal': return revealHTML();
@@ -481,6 +482,43 @@ function lobbyHTML() {
   </section>`;
 }
 
+/* ---- غرفة الانتظار (لاعب دخل أثناء جولة شغّالة) ---- */
+function waitingHTML() {
+  const g = S.game;
+  const names = { reveal: 'اللاعبين يشوفون أدوارهم', questions: 'الأسئلة بالدور', free: 'الأسئلة الحرة', vote: 'التصويت', guess: 'تخمين السالفة' };
+  const sorted = S.players.slice().sort((a, b) => b.score - a.score);
+  const list = sorted.map((p) => {
+    const playing = g.participants.includes(p.id);
+    return `<div class="prow ${p.id === S.me ? 'me' : ''} ${p.connected ? '' : 'off'}">${av(p.id)}<span class="nm grow">${esc(p.name)}${p.id === S.me ? ' <span class="muted" style="font-weight:500">(أنت)</span>' : ''}</span>
+      ${p.id === S.hostId ? '<span class="pill amber">👑 المضيف</span>' : ''}
+      <span class="pill ${playing ? 'green' : ''}">${playing ? 'يلعب' : 'ينتظر'}</span>
+      <b class="cairo" style="direction:ltr">${p.score}</b></div>`;
+  }).join('');
+  const hostBtns = !isHost() ? '' : ({
+    reveal: '<button class="btn ghost sm" style="align-self:center" data-act="skip-reveal">ابدأ الأسئلة بدون انتظار</button>',
+    questions: '<button class="btn primary" data-act="next-turn">⏭️ السؤال التالي</button><button class="btn ghost sm" style="align-self:center" data-act="skip-free">تخطّي للأسئلة الحرة</button>',
+    free: '<button class="btn primary" data-act="start-vote">🗳️ ابدأ التصويت الآن</button>',
+    vote: '<button class="btn ghost sm" style="align-self:center" data-act="end-vote">إنهاء التصويت الآن</button>',
+    guess: '<button class="btn ghost sm" style="align-self:center" data-act="skip-guess">تخطّي التخمين</button>',
+  }[S.phase] || '');
+  return `<section class="screen">
+    <div class="card center"><div style="font-size:48px">⏳</div>
+      <h2 style="font-size:24px;margin:6px 0">غرفة الانتظار</h2>
+      <p class="muted" style="margin:0 0 10px">الجولة ${S.roundNo} شغّالة الحين (${names[S.phase]}) — موضوعها ${g.topic.icon} ${esc(g.topic.name)}.<br>بتدخل اللعب تلقائياً من الجولة الجاية.</p>
+      <div class="muted" style="font-weight:700">كود الغرفة</div>
+      <div class="codeboxes">${[...S.code].map((d) => `<b>${d}</b>`).join('')}</div>
+      <div class="row wrap" style="justify-content:center">
+        <button class="btn sm" data-act="copy-code">📋 نسخ الكود</button>
+        <button class="btn sm" data-act="copy-link">🔗 نسخ رابط الدعوة</button>
+        ${navigator.share ? '<button class="btn sm" data-act="share">📤 مشاركة</button>' : ''}
+      </div>
+    </div>
+    <div class="card"><h3>اللاعبين (${S.players.length}/${S.max})</h3><div class="plist">${list}</div></div>
+    ${hostBtns}
+    <button class="btn ghost danger" data-act="leave">🚪 خروج من الغرفة</button>
+  </section>`;
+}
+
 /* ---- كشف الدور ---- */
 function revealHTML() {
   const g = S.game;
@@ -506,10 +544,17 @@ function revealHTML() {
 /* ---- الأسئلة بالدور ---- */
 function penaltyBtn() {
   const g = S.game; const pn = g.penalty;
-  const busy = !!pn.active;
+  const busy = !!pn.active || !!(g.wordChange && g.wordChange.active);
   const none = pn.proposalsLeft <= 0;
   return `<button class="btn danger" data-act="picker-open" ${busy || none ? 'disabled' : ''}>🚩 سؤال كشف السالفة؟ (خصم ${S.cfg.penaltyPoints})
     <span class="muted" style="font-size:13px">باقي ${pn.proposalsLeft}</span></button>`;
+}
+function wordChangeBtn() {
+  const wc = S.game.wordChange;
+  if (!wc) return '';
+  const busy = !!wc.active || !!(S.game.penalty && S.game.penalty.active);
+  return `<button class="btn" data-act="wc-propose" ${busy || wc.proposalsLeft <= 0 ? 'disabled' : ''}>🔄 نغيّر السالفة؟
+    <span class="muted" style="font-size:13px">باقي ${wc.proposalsLeft}</span></button>`;
 }
 function appliedChips() {
   const ap = S.game.penalty ? S.game.penalty.applied : {};
@@ -535,6 +580,7 @@ function questionsHTML() {
     ${meAns ? `<div class="yours">👂 الدور عليك تجاوب! ${g.role === 'out' ? 'اندمج 😏' : 'جاوب بحذر'}</div>` : ''}
     ${isHost() ? `<button class="btn primary" data-act="next-turn">⏭️ السؤال التالي</button>` : `<div class="center muted">الأسئلة والأجوبة شفهية بينكم 🎙️ — المضيف ينقلكم للسؤال التالي</div>`}
     ${penaltyBtn()}
+    ${wordChangeBtn()}
     ${appliedChips()}
     <div class="card"><h3 style="font-size:15px" class="muted">ترتيب الأسئلة</h3><div class="chain">${chain}</div></div>
     ${isHost() ? `<button class="btn ghost sm" style="align-self:center" data-act="skip-free">تخطّي للأسئلة الحرة</button>` : ''}
@@ -549,6 +595,7 @@ function freeHTML() {
     <div class="card center"><h2 style="font-size:26px;margin-bottom:6px">🎤 الأسئلة الحرة</h2>
       <p class="muted" style="margin:0">اسأل أي حد أي سؤال، وحاول تكشف مين برا السالفة. المضيف هو اللي يبدأ التصويت.</p></div>
     ${penaltyBtn()}
+    ${wordChangeBtn()}
     ${appliedChips()}
     ${isHost() ? `<button class="btn primary" data-act="start-vote">🗳️ ابدأ التصويت الآن</button>` : '<div class="center muted">ننتظر المضيف يبدأ التصويت</div>'}
   </section>`;
@@ -645,6 +692,23 @@ function penaltySheet() {
   </div></div>`;
 }
 
+function wordChangeSheet() {
+  if (!S || !S.game || !S.game.wordChange || !S.game.wordChange.active) return '';
+  const a = S.game.wordChange.active;
+  const vs = a.voters.map((id) => {
+    const v = a.votes[id];
+    return `<span class="dot ${v === true ? 'y' : v === false ? 'n' : ''}">${av(id, 'sm')}${esc(nameOf(id))} ${v === true ? '✓' : v === false ? '✗' : '…'}</span>`;
+  }).join('');
+  return `<div class="sheet-bg" style="align-items:flex-end"><div class="sheet pen">
+    <h2 style="color:var(--amber)">🔄 تصويت تغيير السالفة</h2>
+    <p style="font-size:17px"><b>${esc(nameOf(a.proposerId))}</b> يطلب نغيّر السالفة لكلمة ثانية من نفس الموضوع.<br>نغيّر ولا لا؟ <span class="muted">(لازم الكل يوافق)</span></p>
+    <div class="vs">${vs}</div>
+    ${a.canVote ? `<div class="row"><button class="btn green" data-act="wc-yes">👍 نغيّر</button><button class="btn danger" data-act="wc-no">👎 ما نغيّر</button></div>`
+      : `<div class="center muted">تم تصويتك، ننتظر الباقي…</div>`}
+    ${isHost() ? `<button class="btn ghost sm" style="margin:14px auto 0" data-act="wc-cancel">إلغاء التصويت (كمضيف)</button>` : ''}
+  </div></div>`;
+}
+
 function overlays() {
   let h = '';
   if (pickerOpen && S && S.game && S.game.participants) {
@@ -687,6 +751,14 @@ function rulesHTML() {
     </ul>
     <h4>🚩 خصم السؤال الكاشف</h4>
     <p>أثناء الأسئلة، أي لاعب يقدر يضغط «سؤال كشف السالفة؟» ويختار اللاعب اللي سؤاله وضّح السالفة زيادة عن اللزوم. يصير تصويت لكل اللاعبين (غير الملام). <b>إذا وافق الكل</b> تنخصم 10 نقاط من سكوره النهائي، وإذا رفض واحد (أو ألغاه المضيف) ما يصير شي. لكل لاعب 3 محاولات بالجولة.</p>
+    <h4>🔄 تغيير السالفة</h4>
+    <p>أثناء الأسئلة، أي لاعب يقدر يطلب تغيير السالفة. يطلع لكل اللاعبين خيار «نغيّر» أو «ما نغيّر»، و<b>لازم الكل يوافق</b> عشان تتغير لكلمة ثانية من نفس الموضوع (اللي برا يبقى برا). بعد التغيير شوفوا بطاقاتكم 🎴. لكل لاعب محاولتين بالجولة.</p>
+    <h4>الدخول والخروج</h4>
+    <ul>
+      <li>اللي يدخل والجولة شغّالة يستنى بغرفة الانتظار ويلعب من الجولة الجاية.</li>
+      <li>اللي يطلع من الغرفة يظهر للكل مباشرة وينلغى دوره بكل شي.</li>
+      <li>ما يصير لاعبين بنفس الاسم بالغرفة.</li>
+    </ul>
     <h4>نصايح</h4>
     <ul>
       <li><b>جوا السالفة:</b> لا تكون واضح كثير فتفيد اللي برا، ولا غامض كثير فيشكّون فيك.</li>
@@ -726,6 +798,10 @@ const H = {
   'next-turn': () => act('nextTurn'),
   'skip-free': () => act('skipToFree'),
   'sb-toggle': () => { sbOpen = !sbOpen; render(); },
+  'wc-propose': () => act('proposeWordChange'),
+  'wc-yes': () => act('wordChangeVote', { agree: true }),
+  'wc-no': () => act('wordChangeVote', { agree: false }),
+  'wc-cancel': () => act('cancelWordChange'),
   'start-vote': () => act('startVote'),
   'end-vote': () => act('endVote'),
   'skip-guess': () => act('skipGuess'),
