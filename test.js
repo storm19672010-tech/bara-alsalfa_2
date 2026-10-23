@@ -212,6 +212,42 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.strictEqual(host.state.phase, 'lobby', 'انلغت لأقل من 3');
   assert(host.state.notice, 'رسالة إلغاء');
 
+  // مضيف: إنهاء الجولة / نقل الإدارة / الطرد أثناء الجولة
+  {
+    const extra = [new Client('زيد'), new Client('هند')];
+    for (const e of extra) await e.join(host.code);
+    await wait(100);
+    assert((await host.act('start', { topicId: 'food' })).ok);
+    await wait(100);
+    assert.strictEqual(host.state.phase, 'reveal');
+    assert((await extra[0].act('closeRound')).error, 'غير المضيف ما ينهي الجولة');
+    assert((await extra[0].act('kick', { targetId: extra[1].pid })).error, 'غير المضيف ما يطرد');
+    assert((await extra[0].act('transferHost', { targetId: extra[1].pid })).error, 'غير المضيف ما ينقل الإدارة');
+    assert((await host.act('closeRound')).ok);
+    await wait(100);
+    assert.strictEqual(host.state.phase, 'lobby', 'رجعنا لاختيار الموضوع');
+    assert(host.state.notice, 'رسالة إنهاء');
+    assert((await host.act('start', { topicId: 'food' })).ok);
+    await wait(100);
+    const pool = [host, ...extra];
+    const outX = pool.find((c) => c.state.game.role === 'out');
+    const victim = pool.find((c) => c !== host && c !== outX);
+    assert((await host.act('kick', { targetId: victim.pid })).ok, 'طرد أثناء الجولة');
+    await wait(100);
+    assert(!host.state.players.some((p) => p.id === victim.pid), 'انطرد');
+    const nh = pool.find((c) => c !== host && c !== victim);
+    assert((await host.act('transferHost', { targetId: nh.pid })).ok);
+    await wait(100);
+    assert.strictEqual(nh.state.hostId, nh.pid, 'انتقلت الإدارة');
+    assert((await host.act('closeRound')).error, 'المضيف القديم ما عاد يقدر');
+    const wasLive = nh.state.phase !== 'lobby';
+    if (wasLive) { assert((await nh.act('closeRound')).ok); await wait(100); }
+    assert.strictEqual(nh.state.phase, 'lobby');
+    assert((await nh.act('transferHost', { targetId: host.pid })).ok);
+    await wait(50);
+    extra.forEach((e) => e.close());
+  }
+
   // المضيف يطلع: ينحط مضيف ثاني ويوصل إشعار
   const rest = cs.filter((c) => c !== host && c.req && !c.req.destroyed);
   await host.act('leave');

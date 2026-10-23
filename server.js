@@ -581,11 +581,26 @@ function act(room, p, b) {
       return ok();
     }
     case 'kick': {
-      if (!isHost || room.phase !== 'lobby') return err('الطرد من الصالة بس');
+      if (!isHost) return err('بس المضيف يطرد اللاعبين');
       const t = room.players.get(String(b.targetId || ''));
       if (!t || t.id === p.id) return err('ما بصير');
       if (t.conn) { try { t.conn.write('event: kicked\ndata: {}\n\n'); } catch (e) { /* ignore */ } }
       removePlayer(room, t.id, `${t.name} انطرد من الغرفة 🚪`);
+      return ok();
+    }
+    case 'transferHost': {
+      if (!isHost) return err('بس المضيف يعطي الإدارة');
+      const t = room.players.get(String(b.targetId || ''));
+      if (!t || t.id === p.id) return err('ما بصير');
+      room.hostId = t.id;
+      toast(room, `${p.name} أعطى الإدارة لـ ${t.name} 👑`);
+      return ok();
+    }
+    case 'closeRound': {
+      if (!isHost) return err('بس المضيف ينهي الجولة');
+      if (!r || !['reveal', 'questions', 'free', 'vote', 'guess'].includes(room.phase)) return err('ما في جولة شغّالة');
+      abortRound(room, 'المضيف أنهى الجولة. السكور محفوظ، اختاروا موضوع وابدؤوا جولة جديدة.');
+      toast(room, 'المضيف أنهى الجولة 🛑');
       return ok();
     }
     case 'leave': {

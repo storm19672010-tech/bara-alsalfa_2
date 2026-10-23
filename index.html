@@ -305,7 +305,7 @@ let es = null;
 let homeView = 'home';      // home | create | join
 let selTopic = null;
 let sbOpen = true;
-let cardShown = false, cardOpen = false, rulesOpen = false, pickerOpen = false;
+let cardShown = false, cardOpen = false, rulesOpen = false, pickerOpen = false, hostOpen = false;
 let lastToast = null, lastKey = '', lastTurnKey = '', unloading = false;
 window.addEventListener('pagehide', () => { unloading = true; });
 window.addEventListener('beforeunload', () => { unloading = true; });
@@ -437,6 +437,7 @@ function topbar() {
   return `<div class="topbar">
     <span class="title">برّا السالفة</span>
     ${S.phase !== 'lobby' && S.roundNo ? `<span class="pill">جولة ${S.roundNo}</span>` : ''}
+    ${isHost() ? `<button class="iconbtn" data-act="host-open" title="إدارة الغرفة">⚙️</button>` : ''}
     ${showCard ? `<button class="iconbtn" data-act="card-open" title="دوري">🎴</button>` : ''}
     <button class="iconbtn" data-act="rules-open" title="شرح اللعبة">❔</button>
     <button class="iconbtn" data-act="leave" title="خروج">🚪</button>
@@ -770,6 +771,21 @@ function overlays() {
       <div class="pill">الموضوع: ${g.topic.icon} ${esc(g.topic.name)}</div>
       <button class="btn" style="margin-top:16px" data-act="card-close">إخفاء</button></div></div>`;
   }
+  if (hostOpen && S && isHost()) {
+    const live = ['reveal', 'questions', 'free', 'vote', 'guess'].includes(S.phase) && S.game;
+    const others = S.players.filter((p) => p.id !== S.me);
+    const list = others.length ? others.map((p) => `<div class="prow ${p.connected ? '' : 'off'}">${av(p.id)}<span class="nm grow">${esc(p.name)}</span>
+        <button class="btn xs" data-act="transfer" data-id="${p.id}" title="إعطاء الإدارة">👑</button>
+        <button class="btn xs danger" data-act="kick" data-id="${p.id}" title="طرد">✕</button></div>`).join('')
+      : '<p class="muted center">ما في لاعبين ثانيين بالغرفة</p>';
+    h += `<div class="sheet-bg" data-act="host-close"><div class="sheet" data-stop="1">
+      <h2>⚙️ إدارة الغرفة</h2>
+      ${live ? `<button class="btn danger" data-act="close-round">🛑 إنهاء الجولة والرجوع لاختيار الموضوع</button><p class="muted" style="margin:6px 0 0">السكور الحالي بيبقى محفوظ.</p>` : ''}
+      <h4>اللاعبين</h4>
+      <p class="muted" style="margin:0 0 8px">👑 يعطيه الإدارة · ✕ يطرده من الغرفة</p>
+      <div class="plist">${list}</div>
+      <button class="btn ghost" style="margin-top:14px" data-act="host-close">إغلاق</button></div></div>`;
+  }
   if (rulesOpen) h += rulesHTML();
   return h;
 }
@@ -838,6 +854,18 @@ const H = {
   'pick-topic': (d) => { selTopic = d.id; render(); },
   'start': () => act('start', { topicId: selTopic }),
   'kick': (d) => { if (confirm('تطرد هاللاعب؟')) act('kick', { targetId: d.id }); },
+  'host-open': () => { hostOpen = true; render(); },
+  'host-close': () => { hostOpen = false; render(); },
+  'transfer': async (d) => {
+    if (!confirm(`تعطي الإدارة لـ ${nameOf(d.id)}؟`)) return;
+    const j = await act('transferHost', { targetId: d.id });
+    if (j && j.ok) { hostOpen = false; render(); }
+  },
+  'close-round': async () => {
+    if (!confirm('تنهي الجولة وترجع لاختيار الموضوع؟ (السكور محفوظ)')) return;
+    const j = await act('closeRound');
+    if (j && j.ok) { hostOpen = false; render(); }
+  },
   'flip': () => { cardShown = !cardShown; const f = $('.flip'); if (f) f.classList.toggle('on', cardShown); if (cardShown && navigator.vibrate) navigator.vibrate(40); },
   'ready': () => act('ready'),
   'skip-reveal': () => act('skipReveal'),
